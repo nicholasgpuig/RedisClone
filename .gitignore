@@ -1,0 +1,74 @@
+# ---- Build output ----
+/out/
+/build/
+/bin/
+/lib/
+[Dd]ebug/
+[Rr]elease/
+[Xx]64/
+[Xx]86/
+*.exe
+*.out
+*.app
+
+# ---- Compiled objects / libraries ----
+*.o
+*.obj
+*.lo
+*.slo
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.la
+*.pdb
+*.ilk
+*.exp
+
+# ---- CMake ----
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.cmake
+CTestTestfile.cmake
+*.cmake.lock
+compile_commands.json
+
+# ---- Visual Studio ----
+.vs/
+*.user
+*.suo
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+*.aps
+*.ncb
+*.tlog
+
+# ---- VS Code (user-specific) ----
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/c_cpp_properties.json
+!.vscode/extensions.json
+
+# ---- Debug / profiling ----
+*.dSYM/
+*.stackdump
+core
+vgcore.*
+*.gcda
+*.gcno
+*.gcov
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
