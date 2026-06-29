@@ -1,8 +1,22 @@
 
+#include <string>
+#include <string_view>
+#include <vector>
+#include "Storage.h"
+#include "Router.h"
 
-class Router {
+    Router::Router(Storage& storage) : storage_(storage) {}
 
-};
+    void Router::add(std::string name, Handler handler) {
+        m[name] = handler;
+    }
+
+    void Router::dispatch(std::string_view name, const std::vector<std::string_view>& args) {
+        auto it = m.find(name);
+        if (it != m.end()) {
+            it->second(args, storage_);
+        }
+    }
 
 // map; cmd -> handler ptr; handler calls storage class
 // args are array of string views; buffer must outlive then
