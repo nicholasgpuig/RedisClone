@@ -10,12 +10,15 @@ Socket::~Socket() {
     if (fd_ != -1) close(fd_);
 }
 
-Socket::Socket(Socket&& sock) noexcept : fd_(sock.fd()) {}
+Socket::Socket(Socket&& sock) noexcept : fd_(sock.fd()) {
+	sock.fd_ = -1;
+}
 
 Socket& Socket::operator=(Socket&& sock) noexcept {
     if (this == &sock) return *this;
     if (fd_ != -1) close(fd_);
     fd_ = sock.fd();
+	sock.fd_ = -1;
     return *this;
 }
 

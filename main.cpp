@@ -3,50 +3,32 @@
 #include "Socket.h"
 #include "Router.h"
 #include "Storage.h"
-
-struct Command {
-    std::string_view name;
-    std::vector<std::string_view> args;
-};
-
-enum class ParseResponseType {
-    COMPLETE,
-    INCOMPLETE,
-    ERROR,
-};
-
-struct CommandArrayState {
-    std::vector<Command> commands;
-    int start_idx {0};
-    int commands_remaining {-1};
-    int end_idx {0};
-    // parsed commands, remaining command ct, start idx, end to know bytes consumed
-    // won't include buffer due to pipelining; should be filled by parse_commands until parsing complete (ie got all n remaining)
-};
+#include "handle.h"
 
 constexpr int LISTEN_PORT { 6379 };
 
-ParseResponseType parse_commands(std::string_view buf, CommandArrayState& state);
-void handle_client(Socket&& s, Router& router);
-#include <vector>
-
 int main(){
     ServerSocket server(LISTEN_PORT);
+    if (!server) return 1;
+
     Storage storage;
     Router router(storage);
-
-    if (!server) return 1;
+    router.add("PING", handle_ping);
+    router.add("GET", handle_get);
+    router.add("SET", handle_set);
+    router.add("EXISTS", handle_exists);
+    router.add("DEL", handle_del);
 
     while (true)
     {
         Socket sock = server.accept();
-        
+        if (!sock) continue;
+        auto t = std::thread([&router, sock = std::move(sock)]() mutable {
+            handle_client(std::move(sock), router);
+        });
+        t.detach();
 
     }
-    // std::vector<Command> bleh;
-    // parse_commands("*51\r\nlsdfj\r\n", bleh, 0, -1);
-    // parse_commands("51\r\nlsdfj\r\n", bleh, 0, -1);
-    // parse_commands("*ab\r\nlsdfj\r\n", bleh, 0, -1);
 
     return 0;
 }

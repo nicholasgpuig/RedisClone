@@ -17,7 +17,7 @@ struct StringHash {
 
 class Router {
 private:
-    using Handler = std::string(*)(const std::vector<std::string_view>&, Storage&);
+    using Handler = std::string(*)(const std::vector<std::string>&, Storage&);
     std::unordered_map<std::string, Handler, StringHash, std::equal_to<>> m;
     Storage& storage_;
 
@@ -27,7 +27,7 @@ public:
 
     void add(std::string name, Handler handler);
 
-    void dispatch(std::string_view name, const std::vector<std::string_view>& args);
+    [[nodiscard]] std::string dispatch(std::string_view name, const std::vector<std::string>& args);
 };
 
 // map; cmd -> handler ptr; handler calls storage class
