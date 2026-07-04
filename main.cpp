@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <spdlog/spdlog.h>
 #include "Socket.h"
 #include "Router.h"
 #include "Storage.h"
@@ -20,26 +21,39 @@ int main(){
     router.add("DEL", handle_del);
 
     ServerSocket server(LISTEN_PORT);
-    if (!server) return 1;
+    if (!server) {
+        spdlog::error("Server socket failed to start");
+        return 1;
+    }
 
     EpollFd epollFd;
-    if (!epollFd) return 1;
+    if (!epollFd) {
+        spdlog::error("Epoll fd failed to start");
+        return 1;
+    }
     epollFd.register_fd(server.fd());
     std::unordered_map<int, Connection> connMap; // replace w/ events.data.ptr
     epoll_event events[MAX_EVENTS];
 
+    spdlog::info("Started listening");
     while (true) {
         int n = epoll_wait(epollFd.fd(), events, MAX_EVENTS, -1);
-        if (n == -1 && errno != EINTR) return 1;
+        if (n == -1 && errno != EINTR) {
+            spdlog::error("epoll_wait error: {}", errno);
+            return 1;
+        }
         for (int i = 0; i < n; ++i) {
             epoll_event& ev = events[i];
             if (ev.data.fd == server.fd()) {
                 Socket sock = server.accept();
-                if (!sock) continue;
-
+                if (!sock) {
+                    spdlog::error("Server accept failed");
+                    continue;
+                }
                 int fd = sock.fd();
                 epollFd.register_fd(fd);
                 connMap[fd] = Connection{std::move(sock)};
+                spdlog::info("Client accepted: {}", fd);
             } else {
                 auto connIt = connMap.find(ev.data.fd);
                 if (connIt == connMap.end()) continue;

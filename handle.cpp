@@ -9,6 +9,7 @@
 #include <iostream>
 #include <mutex>
 #include <format>
+#include <spdlog/spdlog.h>
 #include "Socket.h"
 #include "Router.h"
 #include "handle.h"
@@ -25,7 +26,8 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
             if (result.ec == std::errc::invalid_argument) return ParseResponseType::ERROR;
             state.start_idx = count_end + 2;
         } else {
-            return ParseResponseType::ERROR; // not a bulk string array
+            spdlog::error("Failed to parse buffer: not a bulk string");
+            return ParseResponseType::ERROR;
         }
     }
 
@@ -62,7 +64,7 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
     return ParseResponseType::COMPLETE;
 }
 
-
+// todo: change from returning sentinel integers and use std::expected?
 int parse_and_send(Connection& connection, Router& router) {
     ParseResponseType res = parse_commands(connection.buf, connection.state);
     while (res == ParseResponseType::COMPLETE) {
@@ -70,7 +72,10 @@ int parse_and_send(Connection& connection, Router& router) {
         size_t total = 0;
         while (total < response.size()) {
             auto sent = send(connection.sock.fd(), response.data() + total, response.size() - total, 0); // todo: make MSG_DONTWAIT and epoll for eagain
-            if (sent == -1) return -1;
+            if (sent == -1) {
+                spdlog::error("Send failure");
+                return -1;
+            }
             total += sent;
         }
         connection.buf.erase(0, connection.state.start_idx); // start_idx should be size of all consumed bytes (start of next command if there)
@@ -78,7 +83,7 @@ int parse_and_send(Connection& connection, Router& router) {
         res = parse_commands(connection.buf, connection.state);
     }
     if (res == ParseResponseType::ERROR) {
-        std::cout << "Parse Error\n";
+        spdlog::error("Parsing failure");
         return -1;
     }
     return 0;
