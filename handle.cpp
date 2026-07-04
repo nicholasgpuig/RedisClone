@@ -19,7 +19,7 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
     
     if (state.strings_remaining == -1) { // no progress yet
         if (buf[0] == '*') {
-            auto count_end = buf.find("\r\n");
+            size_t count_end = buf.find("\r\n");
             if (count_end == std::string::npos) return ParseResponseType::INCOMPLETE;
             auto count_sv = buf.substr(1, count_end - 1);
             auto result = std::from_chars(count_sv.data(), count_sv.data() + count_end - 1, state.strings_remaining);
@@ -37,7 +37,7 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
         
         // find delimit; if len doesn't match, throw; if no delim incomp
         if (buf[state.start_idx] != '$') return ParseResponseType::ERROR;
-        auto size_end = buf.find("\r\n", state.start_idx);
+        size_t size_end = buf.find("\r\n", state.start_idx);
         if (size_end == std::string::npos) return ParseResponseType::INCOMPLETE;
 
         int body_size;
@@ -47,7 +47,7 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
 
         // parse body
         size_t body_start { size_end + 2 };
-        auto body_end = buf.find("\r\n", body_start);
+        size_t body_end = buf.find("\r\n", body_start);
         if (body_end == std::string::npos) return ParseResponseType::INCOMPLETE;
         if (body_end - body_start != body_size) return ParseResponseType::ERROR; // body sz doesn't match
 

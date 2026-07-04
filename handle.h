@@ -14,7 +14,7 @@ enum class ParseResponseType {
 };
 
 struct ClientState {
-    int start_idx {0};
+    size_t start_idx {0};
     int strings_remaining {-1};
     std::string command_name;
     std::vector<std::string> command_args;

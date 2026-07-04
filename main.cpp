@@ -32,7 +32,7 @@ int main(){
         return 1;
     }
     epollFd.register_fd(server.fd());
-    std::unordered_map<int, Connection> connMap; // replace w/ events.data.ptr
+    std::unordered_map<int, Connection> connMap; // todo: replace w/ events.data.ptr
     epoll_event events[MAX_EVENTS];
 
     spdlog::info("Started listening");
