@@ -20,8 +20,14 @@ struct ClientState {
     std::vector<std::string> command_args;
 };
 
+struct Connection {
+    Socket sock;
+    std::string buf;
+    ClientState state;
+};
+
 ParseResponseType parse_commands(std::string_view buf, ClientState& state);
-void handle_client(Socket&& s, Router& router);
+int parse_and_send(Connection& connection, Router& router);
 std::string handle_ping(const std::vector<std::string>& args, Storage& storage);
 std::string handle_set(const std::vector<std::string>& args, Storage& storage);
 std::string handle_get(const std::vector<std::string>& args, Storage& storage);

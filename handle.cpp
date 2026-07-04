@@ -8,11 +8,11 @@
 #include <charconv>
 #include <iostream>
 #include <mutex>
+#include <format>
 #include "Socket.h"
 #include "Router.h"
 #include "handle.h"
 
-// eventually return parse response object w/ optional error (to indicate non retryable); true/false represents is ready
 ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
     if (buf.empty()) return ParseResponseType::INCOMPLETE;
     
@@ -63,38 +63,29 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
 }
 
 
-void handle_client(Socket&& s, Router& router) {
-    std::string buf;
-    ClientState state;
-
-    while (true) {
-        char chunk[4096];
-        ssize_t n = recv(s.fd(), chunk, sizeof(chunk), 0);
-        if (n <= 0) return;
-        buf.append(chunk, n);
-
-        ParseResponseType res = parse_commands(buf, state);
-        while (res == ParseResponseType::COMPLETE) {
-            std::string response = router.dispatch(state.command_name, state.command_args);
-            size_t total = 0;
-            while (total < response.size()) {
-                auto sent = send(s.fd(), response.data() + total, response.size() - total, 0); // assume sends all bytes for now
-                if (sent == -1) return;
-                total += sent;
-            }
-            buf.erase(0, state.start_idx); // start_idx should be size of all consumed bytes (start of next command if there)
-            state = ClientState{state.start_idx};
-            res = parse_commands(buf, state);
+int parse_and_send(Connection& connection, Router& router) {
+    ParseResponseType res = parse_commands(connection.buf, connection.state);
+    while (res == ParseResponseType::COMPLETE) {
+        std::string response = router.dispatch(connection.state.command_name, connection.state.command_args);
+        size_t total = 0;
+        while (total < response.size()) {
+            auto sent = send(connection.sock.fd(), response.data() + total, response.size() - total, 0); // todo: make MSG_DONTWAIT and epoll for eagain
+            if (sent == -1) return -1;
+            total += sent;
         }
-        if (res == ParseResponseType::ERROR) {
-            std::cout << "Parse Error\n";
-            return;
-        }
+        connection.buf.erase(0, connection.state.start_idx); // start_idx should be size of all consumed bytes (start of next command if there)
+        connection.state = ClientState{};
+        res = parse_commands(connection.buf, connection.state);
     }
+    if (res == ParseResponseType::ERROR) {
+        std::cout << "Parse Error\n";
+        return -1;
+    }
+    return 0;
 }
 
 std::string serialize_to_bulk_string(std::string_view sv) {
-    return '$' + std::to_string(sv.size()) + "\r\n" + std::string(sv) + "\r\n";
+    return std::format("${}\r\n{}\r\n", sv.size(), sv);
 }
 
 std::string handle_ping(const std::vector<std::string>& args, Storage& storage) {

@@ -1,16 +1,16 @@
 #include <iostream>
-#include <thread>
+#include <unordered_map>
+#include <sys/epoll.h>
+#include <sys/socket.h>
 #include "Socket.h"
 #include "Router.h"
 #include "Storage.h"
 #include "handle.h"
 
 constexpr int LISTEN_PORT { 6379 };
+constexpr int MAX_EVENTS { 4096 };
 
 int main(){
-    ServerSocket server(LISTEN_PORT);
-    if (!server) return 1;
-
     Storage storage;
     Router router(storage);
     router.add("PING", handle_ping);
@@ -19,36 +19,48 @@ int main(){
     router.add("EXISTS", handle_exists);
     router.add("DEL", handle_del);
 
-    while (true)
-    {
-        Socket sock = server.accept();
-        if (!sock) continue;
-        auto t = std::thread([&router, sock = std::move(sock)]() mutable {
-            handle_client(std::move(sock), router);
-        });
-        t.detach();
+    ServerSocket server(LISTEN_PORT);
+    if (!server) return 1;
 
+    EpollFd epollFd;
+    if (!epollFd) return 1;
+    epollFd.register_fd(server.fd());
+    std::unordered_map<int, Connection> connMap; // replace w/ events.data.ptr
+    epoll_event events[MAX_EVENTS];
+
+    while (true) {
+        int n = epoll_wait(epollFd.fd(), events, MAX_EVENTS, -1);
+        if (n == -1 && errno != EINTR) return 1;
+        for (int i = 0; i < n; ++i) {
+            epoll_event& ev = events[i];
+            if (ev.data.fd == server.fd()) {
+                Socket sock = server.accept();
+                if (!sock) continue;
+
+                int fd = sock.fd();
+                epollFd.register_fd(fd);
+                connMap[fd] = Connection{std::move(sock)};
+            } else {
+                auto connIt = connMap.find(ev.data.fd);
+                if (connIt == connMap.end()) continue;
+                char chunk[4096];
+                auto n = recv(ev.data.fd, chunk, sizeof(chunk), 0);
+                if (n == -1 && errno == EAGAIN) continue;
+                Connection& connection = connIt->second;
+                if (n <= 0) {
+                    epollFd.unregister_fd(connection.sock.fd());
+                    connMap.erase(connection.sock.fd());
+                    continue;
+                }
+                connection.buf.append(chunk, n);
+                if (parse_and_send(connection, router) == -1) {
+                    epollFd.unregister_fd(connection.sock.fd());
+                    connMap.erase(connection.sock.fd());
+                }
+            }
+        }
     }
+
 
     return 0;
 }
-
-
-// GET bulk string value of key; null bulk string
-// SET +OK\r\n
-// DEL :+1\r\n if key removed else 0
-// EXISTS :+1\r\n if found else 0
-// PING +PONG\r\n if no arg; else bulk string
-
-// *n\r\n<val1>\r\n
-
-// storage class
-// parsing logic
-// listening loop w/ raii sockets
-// router w/ dispatch to handler
-// return handler response
-
-// server socket listens, spawns thread on each accept
-    // thread owns client, parses recv until valid
-    // dispatches to router
-    // sends response

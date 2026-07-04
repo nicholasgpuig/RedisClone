@@ -37,3 +37,22 @@ public:
     [[nodiscard]] int fd() const noexcept { return fd_; }
     explicit operator bool() const noexcept { return fd_ != -1; }
 };
+
+
+class EpollFd {
+    int epfd_;
+public:
+    EpollFd();
+    ~EpollFd();
+
+    EpollFd(const EpollFd&) = delete;
+    EpollFd& operator=(const EpollFd&) = delete;
+    EpollFd(EpollFd&&) = delete;
+    EpollFd& operator=(EpollFd&&) = delete;
+
+    int register_fd(int fd) const;
+    int unregister_fd(int fd) const;
+
+    [[nodiscard]] int fd() const noexcept { return epfd_; }
+    explicit operator bool() const noexcept { return epfd_ != -1; }
+};

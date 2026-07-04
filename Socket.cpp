@@ -1,4 +1,6 @@
 #include <netinet/in.h>
+#include <fcntl.h>
+#include <sys/epoll.h>
 #include "Socket.h"
 
 
@@ -52,5 +54,25 @@ ServerSocket::~ServerSocket() {
 
 Socket ServerSocket::accept() const {
 	int fd = ::accept(fd_, nullptr, nullptr);
+	if (fd != -1)
+		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
 	return Socket(fd);
+}
+
+
+EpollFd::EpollFd() : epfd_(epoll_create1(EPOLL_CLOEXEC)) {}
+
+EpollFd::~EpollFd() {
+	if (epfd_ != -1) close(epfd_);
+}
+
+int EpollFd::register_fd(int fd) const {
+	epoll_event event;
+	event.events = EPOLLIN;
+	event.data.fd = fd;
+	return epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &event);
+}
+
+int EpollFd::unregister_fd(int fd) const {
+	return epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr);
 }
