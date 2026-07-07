@@ -19,6 +19,12 @@ int main(){
     router.add("SET", handle_set);
     router.add("EXISTS", handle_exists);
     router.add("DEL", handle_del);
+    router.add("LPUSH", handle_lpush);
+    router.add("RPUSH", handle_rpush);
+    router.add("LPOP", handle_lpop);
+    router.add("RPOP", handle_rpop);
+    router.add("LLEN", handle_llen);
+    router.add("LRANGE", handle_lrange);
 
     ServerSocket server(LISTEN_PORT);
     if (!server) {

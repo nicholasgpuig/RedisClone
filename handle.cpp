@@ -93,6 +93,122 @@ std::string serialize_to_bulk_string(std::string_view sv) {
     return std::format("${}\r\n{}\r\n", sv.size(), sv);
 }
 
+std::string serialize_to_string_array(const std::vector<std::string>& strings) {
+    std::string out;
+    out += std::format("*{}\r\n", strings.size());
+    for (auto& s : strings) {
+        out += std::format("${}\r\n{}\r\n", s.size(), s);
+    }
+    return out;
+}
+
+template <typename T>
+std::string serialize_to_integer_reply(T num) { // concept in future to ensure integral?
+    return std::format(":{}\r\n", num);
+}
+/*
+    Key value string handlers
+*/
+
+std::string handle_set(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+
+    storage.set(args[0], args[1]);
+    return "+OK\r\n";
+}
+
+std::string handle_get(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT; // handling 1 key for now
+
+    const StorageResult res = storage.get(args[0]);
+    if (!res.ok()) {
+        if (res.error == StorageError::NotFound) return "$-1\r\n";
+        return ERROR_WRONG_TYPE;
+    }
+    return serialize_to_bulk_string(res.value);
+}
+
+/*
+    List handlers
+*/
+
+std::string handle_lpush(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+
+    const StorageResult<size_t> res = storage.deque_push(args[0], args[1], true);
+    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
+    return serialize_to_integer_reply(res.value);
+}
+
+std::string handle_rpush(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+
+    const StorageResult<size_t> res = storage.deque_push(args[0], args[1], false);
+    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
+    return serialize_to_integer_reply(res.value);
+}
+
+std::string handle_lpop(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+
+    const StorageResult<std::string> res = storage.deque_pop(args[0], true);
+    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
+    if (res.error == StorageError::NotFound) return "$-1\r\n";
+    return serialize_to_bulk_string(res.value);
+}
+
+std::string handle_rpop(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+
+    const StorageResult<std::string> res = storage.deque_pop(args[0], false);
+    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
+    if (res.error == StorageError::NotFound) return "$-1\r\n";
+    return serialize_to_bulk_string(res.value);
+}
+
+std::string handle_llen(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+
+    const StorageResult<size_t> res = storage.deque_len(args[0]);
+    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
+    return serialize_to_integer_reply(res.value);
+}
+
+std::string handle_lrange(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 3) return ERROR_INVALID_ARG_COUNT;
+
+    ssize_t lIndex;
+    auto lresult = std::from_chars(args[1].data(), args[1].data() + args[1].size(), lIndex);
+    if (lresult.ec == std::errc::invalid_argument) return "-ERR value is not an integer or out of range\r\n";
+    ssize_t rIndex;
+    auto rresult = std::from_chars(args[2].data(), args[2].data() + args[2].size(), rIndex);
+    if (rresult.ec == std::errc::invalid_argument) return "-ERR value is not an integer or out of range\r\n";
+
+    const StorageResult<std::vector<std::string>> res = storage.deque_range(args[0], lIndex, rIndex);
+    return serialize_to_string_array(res.value);
+}
+
+/*
+    Misc handlers
+*/
+
+std::string handle_exists(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+
+    return storage.exists(args[0]) ? ":1\r\n" : ":0\r\n";
+}
+
+std::string handle_del(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+
+    const auto n = storage.del(args[0]);
+    return n ? ":1\r\n" : ":0\r\n";
+}
+
+std::string handle_unknown() {
+    return "-Error unknown command\r\n";
+}
+
 std::string handle_ping(const std::vector<std::string>& args, Storage& storage) {
     if (args.size() > 1) {
         return ERROR_INVALID_ARG_COUNT;
@@ -100,50 +216,4 @@ std::string handle_ping(const std::vector<std::string>& args, Storage& storage) 
         return serialize_to_bulk_string(args[0]);
     }
     return "+PONG\r\n";
-}
-
-std::string handle_set(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
-
-    std::lock_guard lock(storage.lock);
-    storage.m_[args[0]] = args[1];
-    return "+OK\r\n";
-}
-
-std::string handle_get(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT; // handling 1 key for now
-
-    std::optional<std::string> value;
-    {
-        std::lock_guard lock(storage.lock);
-        auto it = storage.m_.find(args[0]);
-        if (it != storage.m_.end()) {
-            value = it->second;
-        }
-    }
-    if (value) {
-        return serialize_to_bulk_string(*value);
-    }
-    return "$-1\r\n";
-}
-
-std::string handle_exists(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
-
-    std::lock_guard lock(storage.lock);
-    if (storage.m_.find(args[0]) != storage.m_.end())
-        return ":1\r\n";
-    return ":0\r\n";
-}
-
-std::string handle_del(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
-
-    std::lock_guard lock(storage.lock);
-    auto n = storage.m_.erase(args[0]);
-    return n ? ":1\r\n" : ":0\r\n";
-}
-
-std::string handle_unknown() {
-    return "-Error unknown command\r\n";
 }
