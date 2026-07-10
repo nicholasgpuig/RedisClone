@@ -40,4 +40,7 @@ std::string handle_lpop(const std::vector<std::string>& args, Storage& storage);
 std::string handle_rpop(const std::vector<std::string>& args, Storage& storage);
 std::string handle_llen(const std::vector<std::string>& args, Storage& storage);
 std::string handle_lrange(const std::vector<std::string>& args, Storage& storage);
+std::string handle_expire(const std::vector<std::string>& args, Storage& storage);
+std::string handle_persist(const std::vector<std::string>& args, Storage& storage);
+std::string handle_ttl(const std::vector<std::string>& args, Storage& storage);
 std::string handle_unknown();

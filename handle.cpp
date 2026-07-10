@@ -185,6 +185,7 @@ std::string handle_lrange(const std::vector<std::string>& args, Storage& storage
     if (rresult.ec == std::errc::invalid_argument) return "-ERR value is not an integer or out of range\r\n";
 
     const StorageResult<std::vector<std::string>> res = storage.deque_range(args[0], lIndex, rIndex);
+    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
     return serialize_to_string_array(res.value);
 }
 
@@ -202,7 +203,30 @@ std::string handle_del(const std::vector<std::string>& args, Storage& storage) {
     if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
 
     const auto n = storage.del(args[0]);
-    return n ? ":1\r\n" : ":0\r\n";
+    return serialize_to_integer_reply(n);
+}
+
+std::string handle_expire(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+
+    int seconds;
+    auto parseResult = std::from_chars(args[1].data(), args[1].data() + args[1].size(), seconds);
+    if (parseResult.ec == std::errc::invalid_argument || seconds <= 0) return "-ERR value is not an integer or out of range\r\n";
+
+    const size_t n = storage.expire(args[0], seconds);
+    return serialize_to_integer_reply(n);
+}
+
+std::string handle_persist(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+
+    return serialize_to_integer_reply(storage.persist(args[0]));
+}
+
+std::string handle_ttl(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+
+    return serialize_to_integer_reply(storage.ttl(args[0]));
 }
 
 std::string handle_unknown() {

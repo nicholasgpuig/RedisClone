@@ -7,6 +7,7 @@
 #include <variant>
 #include <mutex>
 #include <optional>
+#include <chrono>
 #include "StringHash.h"
 
 enum class StorageError {
@@ -24,13 +25,15 @@ struct StorageResult {
 
 class Storage {
     using RedisValue = std::variant<
-        std::unordered_map<std::string, std::string>,
-        std::unordered_set<std::string>,
+        // std::unordered_map<std::string, std::string>, // could implement later if i have time lol
+        // std::unordered_set<std::string>,
         std::deque<std::string>,
         std::string
     >;
     std::unordered_map<std::string, RedisValue, StringHash, std::equal_to<>> m_;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point, StringHash, std::equal_to<>> expiry;
     std::mutex lock;
+    bool _check_and_delete_if_expr(std::string_view);
 
 public:
 
@@ -42,4 +45,8 @@ public:
     StorageResult<std::string> deque_pop(std::string_view, bool);
     StorageResult<size_t> deque_len(std::string_view);
     StorageResult<std::vector<std::string>> deque_range(std::string_view, ssize_t, ssize_t);
+    size_t expire(std::string_view, int);
+    size_t persist(std::string_view);
+    int ttl(std::string_view);
+    void sample_twenty_expired();
 };

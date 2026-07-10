@@ -1,4 +1,3 @@
-#include <iostream>
 #include <unordered_map>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -25,6 +24,9 @@ int main(){
     router.add("RPOP", handle_rpop);
     router.add("LLEN", handle_llen);
     router.add("LRANGE", handle_lrange);
+    router.add("EXPIRE", handle_expire);
+    router.add("PERSIST", handle_persist);
+    router.add("TTL", handle_ttl);
 
     ServerSocket server(LISTEN_PORT);
     if (!server) {
