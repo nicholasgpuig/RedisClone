@@ -3,6 +3,8 @@
 #include <netinet/in.h>
 #include <unistd.h>
 
+struct Connection;
+
 class Socket {
 private:
     int fd_{-1};
@@ -50,8 +52,9 @@ public:
     EpollFd(EpollFd&&) = delete;
     EpollFd& operator=(EpollFd&&) = delete;
 
-    int register_fd(int fd) const;
-    int unregister_fd(int fd) const;
+    int register_connection(Connection*) const;
+    int register_fd(int) const;
+    int unregister_connection(Connection*) const;
 
     [[nodiscard]] int fd() const noexcept { return epfd_; }
     explicit operator bool() const noexcept { return epfd_ != -1; }

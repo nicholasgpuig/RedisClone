@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include "Socket.h"
+#include "handle.h"
 
 
 Socket::Socket(int fd) noexcept : fd_(fd) {}
@@ -66,13 +67,23 @@ EpollFd::~EpollFd() {
 	if (epfd_ != -1) close(epfd_);
 }
 
+int EpollFd::register_connection(Connection* conn_ptr) const {
+	epoll_event event;
+	event.events = EPOLLIN;
+	event.data.ptr = conn_ptr;
+	return epoll_ctl(epfd_, EPOLL_CTL_ADD, conn_ptr->sock.fd(), &event);
+}
+
+// for registering server fd which must have .data.ptr == nullptr
 int EpollFd::register_fd(int fd) const {
 	epoll_event event;
 	event.events = EPOLLIN;
-	event.data.fd = fd;
+	event.data.ptr = nullptr;
 	return epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &event);
 }
 
-int EpollFd::unregister_fd(int fd) const {
-	return epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr);
+int EpollFd::unregister_connection(Connection* conn_ptr) const {
+	int res = epoll_ctl(epfd_, EPOLL_CTL_DEL, conn_ptr->sock.fd(), nullptr);
+	delete conn_ptr;
+	return res;
 }

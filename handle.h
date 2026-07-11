@@ -14,6 +14,19 @@ enum class ParseResponseType {
     ERROR,
 };
 
+enum class ParseSendError {
+    PARSE,
+    SEND,
+    OK
+};
+
+struct ParseSendResult {
+    uint64_t bytes_read;
+    uint64_t bytes_sent;
+    uint64_t commands;
+    ParseSendError error;
+};
+
 struct ClientState {
     size_t start_idx {0};
     int strings_remaining {-1};
@@ -28,7 +41,7 @@ struct Connection {
 };
 
 ParseResponseType parse_commands(std::string_view buf, ClientState& state);
-int parse_and_send(Connection& connection, Router& router);
+ParseSendResult parse_and_send(Connection& connection, Router& router);
 std::string handle_ping(const std::vector<std::string>& args, Storage& storage);
 std::string handle_set(const std::vector<std::string>& args, Storage& storage);
 std::string handle_get(const std::vector<std::string>& args, Storage& storage);
@@ -44,3 +57,4 @@ std::string handle_expire(const std::vector<std::string>& args, Storage& storage
 std::string handle_persist(const std::vector<std::string>& args, Storage& storage);
 std::string handle_ttl(const std::vector<std::string>& args, Storage& storage);
 std::string handle_unknown();
+std::string handle_info(const std::vector<std::string>& args, Storage& storage);

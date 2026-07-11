@@ -8,7 +8,15 @@
 #include <mutex>
 #include <optional>
 #include <chrono>
+#include <atomic>
 #include "StringHash.h"
+
+struct Stats {
+    std::atomic<int64_t> clients_connected{0};
+    std::atomic<uint64_t> total_commands{0};
+    std::atomic<uint64_t> bytes_read{0};
+    std::atomic<uint64_t> bytes_written{0};
+};
 
 enum class StorageError {
     NotFound,
@@ -36,7 +44,7 @@ class Storage {
     bool _check_and_delete_if_expr(std::string_view);
 
 public:
-
+    Stats stats;
     void set(std::string, std::string);
     StorageResult<std::string> get(std::string_view);
     bool exists(std::string_view);
@@ -48,5 +56,5 @@ public:
     size_t expire(std::string_view, int);
     size_t persist(std::string_view);
     int ttl(std::string_view);
-    void sample_twenty_expired();
+    std::string info();
 };

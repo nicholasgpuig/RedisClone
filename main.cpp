@@ -27,6 +27,7 @@ int main(){
     router.add("EXPIRE", handle_expire);
     router.add("PERSIST", handle_persist);
     router.add("TTL", handle_ttl);
+    router.add("INFO", handle_info);
 
     ServerSocket server(LISTEN_PORT);
     if (!server) {
@@ -40,7 +41,6 @@ int main(){
         return 1;
     }
     epollFd.register_fd(server.fd());
-    std::unordered_map<int, Connection> connMap; // todo: replace w/ events.data.ptr
     epoll_event events[MAX_EVENTS];
 
     spdlog::info("Started listening");
@@ -52,32 +52,39 @@ int main(){
         }
         for (int i = 0; i < n; ++i) {
             epoll_event& ev = events[i];
-            if (ev.data.fd == server.fd()) {
+            if (ev.data.ptr == nullptr) {
                 Socket sock = server.accept();
                 if (!sock) {
                     spdlog::error("Server accept failed");
                     continue;
                 }
                 int fd = sock.fd();
-                epollFd.register_fd(fd);
-                connMap[fd] = Connection{std::move(sock)};
-                spdlog::info("Client accepted: {}", fd);
-            } else {
-                auto connIt = connMap.find(ev.data.fd);
-                if (connIt == connMap.end()) continue;
-                char chunk[4096];
-                auto n = recv(ev.data.fd, chunk, sizeof(chunk), 0);
-                if (n == -1 && errno == EAGAIN) continue;
-                Connection& connection = connIt->second;
-                if (n <= 0) {
-                    epollFd.unregister_fd(connection.sock.fd());
-                    connMap.erase(connection.sock.fd());
+                Connection* conn_ptr { new(std::nothrow) Connection{std::move(sock)} };
+                if (conn_ptr == nullptr) {
+                    spdlog::error("new Connection allocation failed");
                     continue;
                 }
-                connection.buf.append(chunk, n);
-                if (parse_and_send(connection, router) == -1) {
-                    epollFd.unregister_fd(connection.sock.fd());
-                    connMap.erase(connection.sock.fd());
+                epollFd.register_connection(conn_ptr);
+                spdlog::info("Client accepted: {}", fd);
+                storage.stats.clients_connected.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                Connection* connection = static_cast<Connection*>(ev.data.ptr);
+                char chunk[4096];
+                auto n = recv(connection->sock.fd(), chunk, sizeof(chunk), 0);
+                if (n == -1 && errno == EAGAIN) continue;
+                if (n <= 0) {
+                    epollFd.unregister_connection(connection);
+                    storage.stats.clients_connected.fetch_add(-1, std::memory_order_relaxed);
+                    continue;
+                }
+                connection->buf.append(chunk, n);
+                auto result = parse_and_send(*connection, router);
+                storage.stats.bytes_read.fetch_add(result.bytes_read, std::memory_order_relaxed);
+                storage.stats.bytes_written.fetch_add(result.bytes_sent, std::memory_order_relaxed);
+                storage.stats.total_commands.fetch_add(result.commands, std::memory_order_relaxed);
+                if (result.error != ParseSendError::OK) {
+                    epollFd.unregister_connection(connection);
+                    storage.stats.clients_connected.fetch_add(-1, std::memory_order_relaxed);
                 }
             }
         }

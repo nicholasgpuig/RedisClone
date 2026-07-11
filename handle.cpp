@@ -65,18 +65,23 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
 }
 
 // todo: change from returning sentinel integers and use std::expected?
-int parse_and_send(Connection& connection, Router& router) {
+ParseSendResult parse_and_send(Connection& connection, Router& router) {
+    ParseSendResult result {0, 0, 0, ParseSendError::OK};
     ParseResponseType res = parse_commands(connection.buf, connection.state);
     while (res == ParseResponseType::COMPLETE) {
+        result.bytes_read += connection.state.start_idx;
+        ++result.commands;
         std::string response = router.dispatch(connection.state.command_name, connection.state.command_args);
         size_t total = 0;
         while (total < response.size()) {
             auto sent = send(connection.sock.fd(), response.data() + total, response.size() - total, 0); // todo: make MSG_DONTWAIT and epoll for eagain
             if (sent == -1) {
                 spdlog::error("Send failure");
-                return -1;
+                result.error = ParseSendError::SEND;
+                return result;
             }
             total += sent;
+            result.bytes_sent += sent;
         }
         connection.buf.erase(0, connection.state.start_idx); // start_idx should be size of all consumed bytes (start of next command if there)
         connection.state = ClientState{};
@@ -84,9 +89,9 @@ int parse_and_send(Connection& connection, Router& router) {
     }
     if (res == ParseResponseType::ERROR) {
         spdlog::error("Parsing failure");
-        return -1;
+        result.error = ParseSendError::PARSE;
     }
-    return 0;
+    return result;
 }
 
 std::string serialize_to_bulk_string(std::string_view sv) {
@@ -240,4 +245,10 @@ std::string handle_ping(const std::vector<std::string>& args, Storage& storage) 
         return serialize_to_bulk_string(args[0]);
     }
     return "+PONG\r\n";
+}
+
+std::string handle_info(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() > 0) return ERROR_INVALID_ARG_COUNT;
+
+    return serialize_to_bulk_string(storage.info());
 }
