@@ -11,6 +11,7 @@
 
 constexpr int LISTEN_PORT { 6379 };
 constexpr int MAX_EVENTS { 4096 };
+constexpr int NUM_THREADS { 8 }; // could be hardware_concurrency() but not while i have client on my machine too
 
 void worker_loop(const EpollFd& epoll_fd, const ServerSocket& server, Storage& storage, Router& router);
 
@@ -46,13 +47,12 @@ int main(){
     }
     epoll_fd.register_fd(server.fd());
 
-    const unsigned int N = 8; // std::thread::hardware_concurrency();
     std::vector<std::thread> threads;
-    for (uint32_t i = 0; i + 1 < N; ++i) {
+    for (uint32_t i = 0; i + 1 < NUM_THREADS; ++i) {
         threads.emplace_back(worker_loop, std::ref(epoll_fd), std::ref(server), std::ref(storage), std::ref(router));
         threads[i].detach();
     }
-    spdlog::info("Started listening on {} threads", N);
+    spdlog::info("Started listening on {} threads", NUM_THREADS);
     worker_loop(epoll_fd, server, storage, router);
 
     return 0;

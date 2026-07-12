@@ -57,3 +57,15 @@ Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)
 8threads-4cores      700000          680093.62       0.08700         0.15100        
 8threads-4cores      750000          664099.41       0.11100         0.20700
 
+
+**Sharded locks - 8 threads, 16 shards**
+taskset -c 0-7 ./build/RedisClone 
+taskset -c 8,10,12,14 ./benchmark.sh rate-sweep 8threads-4cores
+Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+-------------------- ----------      ----------      --------        --------       
+8threads-4cores      100000          100014.15       0.08700         0.18300        
+8threads-4cores      200000          200006.40       0.08700         0.16700        
+8threads-4cores      300000          299979.84       0.08700         0.15900        
+8threads-4cores      500000          499672.26       0.08700         0.15900        
+8threads-4cores      700000          679319.36       0.08700         0.15900        
+8threads-4cores      750000          678765.62       0.08700         0.19900

@@ -31,6 +31,12 @@ struct StorageResult {
     bool ok() const { return error == StorageError::Ok; }
 };
 
+struct Shard {
+    std::unordered_map<std::string, std::variant<std::string, std::deque<std::string>>, StringHash, std::equal_to<>> m_;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point, StringHash, std::equal_to<>> expiry;
+    std::mutex lock;
+};
+
 class Storage {
     using RedisValue = std::variant<
         // std::unordered_map<std::string, std::string>, // could implement later if i have time lol
@@ -38,10 +44,10 @@ class Storage {
         std::deque<std::string>,
         std::string
     >;
-    std::unordered_map<std::string, RedisValue, StringHash, std::equal_to<>> m_;
-    std::unordered_map<std::string, std::chrono::steady_clock::time_point, StringHash, std::equal_to<>> expiry;
-    std::mutex lock;
-    bool _check_and_delete_if_expr(std::string_view);
+    static constexpr int NUM_SHARDS { 16 };
+    std::array<Shard, NUM_SHARDS> shards;
+    bool _check_and_delete_if_expr(std::string_view, Shard&);
+    Shard& _shard_for(std::string_view);
 
 public:
     Stats stats;
