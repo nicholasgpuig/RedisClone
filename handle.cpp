@@ -64,7 +64,7 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
     return ParseResponseType::COMPLETE;
 }
 
-// todo: change from returning sentinel integers and use std::expected?
+
 ParseSendResult parse_and_send(Connection& connection, Router& router) {
     ParseSendResult result {0, 0, 0, ParseSendError::OK};
     ParseResponseType res = parse_commands(connection.buf, connection.state);
@@ -74,7 +74,7 @@ ParseSendResult parse_and_send(Connection& connection, Router& router) {
         std::string response = router.dispatch(connection.state.command_name, connection.state.command_args);
         size_t total = 0;
         while (total < response.size()) {
-            auto sent = send(connection.sock.fd(), response.data() + total, response.size() - total, 0); // todo: make MSG_DONTWAIT and epoll for eagain
+            auto sent = send(connection.sock.fd(), response.data() + total, response.size() - total, MSG_DONTWAIT); // todo: make MSG_DONTWAIT and epoll for eagain
             if (sent == -1) {
                 spdlog::error("Send failure");
                 result.error = ParseSendError::SEND;

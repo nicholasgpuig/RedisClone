@@ -21,14 +21,39 @@ Disabling C-states prevents the CPU from idling between requests, which exhausts
 
 ### Numbers
 
-Single-threaded; using connMap lookups no lock_guards
+**Single-threaded; using connMap lookups no lock_guards**
 commit: 09b67dcb64a56591ece4320c8ae68d48ec374054
 
+Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+----------      ----------      --------        --------       
+25000           24641.12        0.22300         0.53500        
+50000           49923.69        0.29500         0.55100        
+100000          99999.39        0.29500         0.53500        
+200000          199992.54       0.30300         0.57500        
+250000          246734.10       0.31100         0.43900        
+300000          260359.26       0.31100         0.33500
+
+
+**Global lock - 4 threads core pinned**
 Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
--------------------- ----------      ----------      --------        --------       
-single-thread        25000           24641.12        0.22300         0.53500        
-single-thread        50000           49923.69        0.29500         0.55100        
-single-thread        100000          99999.39        0.29500         0.53500        
-single-thread        200000          199992.54       0.30300         0.57500        
-single-thread        250000          246734.10       0.31100         0.43900        
-single-thread        300000          260359.26       0.31100         0.33500
+-------------------- ----------      ----------      --------        --------             
+4threads             100000          99998.74        0.08700         0.15900        
+4threads             200000          199987.11       0.08700         0.17500        
+4threads             300000          299966.21       0.08700         0.21500        
+4threads             500000          499456.73       0.08700         0.24700        
+4threads             700000          642911.41       0.08700         0.26300        
+4threads             750000          675901.12       0.08700         0.25500
+
+
+**Global lock - 8 threads**
+taskset -c 0-7 ./build/RedisClone 
+taskset -c 8,10,12,14 ./benchmark.sh rate-sweep 8threads-4cores
+Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+-------------------- ----------      ----------      --------        --------              
+8threads-4cores      100000          100013.84       0.08700         0.19900        
+8threads-4cores      200000          200005.09       0.08700         0.16700        
+8threads-4cores      300000          300008.29       0.08700         0.15900        
+8threads-4cores      500000          499097.76       0.08700         0.15900        
+8threads-4cores      700000          680093.62       0.08700         0.15100        
+8threads-4cores      750000          664099.41       0.11100         0.20700
+

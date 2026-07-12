@@ -17,14 +17,14 @@ bool Storage::_check_and_delete_if_expr(std::string_view key) {
 }
 
 void Storage::set(std::string key, std::string value) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = expiry.find(std::string_view(key));
     if (it != expiry.end()) expiry.erase(it);
     m_[std::move(key)] = std::move(value);
 }
 
 StorageResult<std::string> Storage::get(std::string_view key) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     if (it == m_.end() || _check_and_delete_if_expr(key)) return {{}, StorageError::NotFound};
     if (const auto* s = std::get_if<std::string>(&it->second)) {
@@ -35,12 +35,12 @@ StorageResult<std::string> Storage::get(std::string_view key) {
 }
 
 bool Storage::exists(std::string_view key) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     return (m_.find(key) != m_.end() && !_check_and_delete_if_expr(key));
 }
 
 size_t Storage::del(std::string_view key) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto eit = expiry.find(key);
     if (eit != expiry.end()) expiry.erase(eit);
     auto it = m_.find(key);
@@ -52,7 +52,7 @@ size_t Storage::del(std::string_view key) {
 }
 
 StorageResult<size_t> Storage::deque_push(std::string_view key, std::string value, bool isLeftPush) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     if (it == m_.end() || _check_and_delete_if_expr(key)) {
         m_[std::string(key)] = std::deque<std::string>();
@@ -71,7 +71,7 @@ StorageResult<size_t> Storage::deque_push(std::string_view key, std::string valu
 }
 
 StorageResult<std::string> Storage::deque_pop(std::string_view key, bool isLeftPop) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     if (it == m_.end() || _check_and_delete_if_expr(key)) return {{}, StorageError::NotFound};
     auto* l = std::get_if<std::deque<std::string>>(&it->second);
@@ -95,7 +95,7 @@ StorageResult<std::string> Storage::deque_pop(std::string_view key, bool isLeftP
 }
 
 StorageResult<size_t> Storage::deque_len(std::string_view key) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     if (it == m_.end() || _check_and_delete_if_expr(key)) return {0, StorageError::Ok};
     const auto* l = std::get_if<std::deque<std::string>>(&it->second);
@@ -105,7 +105,7 @@ StorageResult<size_t> Storage::deque_len(std::string_view key) {
 }
 
 StorageResult<std::vector<std::string>> Storage::deque_range(std::string_view key, ssize_t lIndex, ssize_t rIndex) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     if (it == m_.end() || _check_and_delete_if_expr(key)) return {{}, StorageError::Ok};
     const auto* l = std::get_if<std::deque<std::string>>(&it->second);
@@ -125,7 +125,7 @@ StorageResult<std::vector<std::string>> Storage::deque_range(std::string_view ke
 }
 
 size_t Storage::expire(std::string_view key, int seconds) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     if (it == m_.end() || _check_and_delete_if_expr(key)) return 0;
 
@@ -134,7 +134,7 @@ size_t Storage::expire(std::string_view key, int seconds) {
 }
 
 size_t Storage::persist(std::string_view key) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     auto eit = expiry.find(key);
     if (it == m_.end() || eit == expiry.end() || _check_and_delete_if_expr(key)) return 0;
@@ -143,7 +143,7 @@ size_t Storage::persist(std::string_view key) {
 }
 
 int Storage::ttl(std::string_view key) {
-    //std::lock_guard lg(lock);
+    std::lock_guard lg(lock);
     auto it = m_.find(key);
     if (it == m_.end() || _check_and_delete_if_expr(key)) return -2;
 

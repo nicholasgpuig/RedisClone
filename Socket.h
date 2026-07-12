@@ -53,7 +53,9 @@ public:
     EpollFd& operator=(EpollFd&&) = delete;
 
     int register_connection(Connection*) const;
+    int rearm_connection(Connection*) const;
     int register_fd(int) const;
+    int rearm_fd(int) const;
     int unregister_connection(Connection*) const;
 
     [[nodiscard]] int fd() const noexcept { return epfd_; }

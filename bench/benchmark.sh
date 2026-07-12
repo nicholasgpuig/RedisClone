@@ -21,8 +21,8 @@ set -euo pipefail
 MODE="${1:-rate-sweep}"
 LABEL="${2:-unnamed}"
 
-HOST=127.0.0.1
-PORT=6379
+HOST=${HOST:-127.0.0.1}
+PORT=${PORT:-6379}
 THREADS=4
 CLIENTS=20          # per thread → 80 total connections
 DURATION=20         # seconds per run
@@ -98,7 +98,7 @@ mode_rate_sweep() {
     local total_conns=$((THREADS * CLIENTS))
 
     # Target total RPS values (0 = unlimited)
-    local targets=(25000 50000 100000 200000 250000 300000)
+    local targets=(100000 200000 300000 500000 700000 750000)
 
     print_header
     emit_csv_header
