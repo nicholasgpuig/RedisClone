@@ -1,4 +1,5 @@
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include "Socket.h"
@@ -56,8 +57,11 @@ ServerSocket::~ServerSocket() {
 
 Socket ServerSocket::accept() const {
 	int fd = ::accept(fd_, nullptr, nullptr);
-	if (fd != -1)
+	if (fd != -1) {
 		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+		int opt = 1;
+		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+	}
 	return Socket(fd);
 }
 

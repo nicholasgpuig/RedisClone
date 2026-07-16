@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.10.0)
 project(RedisClone)
 
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "" FORCE)
+endif()
+
 add_executable(RedisClone main.cpp Socket.cpp handle.cpp Router.cpp Storage.cpp)
 
 set_property(TARGET RedisClone PROPERTY CXX_STANDARD 20)

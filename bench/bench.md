@@ -69,3 +69,90 @@ Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)
 8threads-4cores      500000          499672.26       0.08700         0.15900        
 8threads-4cores      700000          679319.36       0.08700         0.15900        
 8threads-4cores      750000          678765.62       0.08700         0.19900
+
+
+**Spinlock atomic flag - 8 threads, 16 shards**
+Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+-------------------- ----------      ----------      --------        --------       
+8threads-spinlock    100000          100004.00       0.08700         0.18300        
+8threads-spinlock    200000          200007.87       0.08700         0.15900        
+8threads-spinlock    300000          299977.26       0.08700         0.15900        
+8threads-spinlock    500000          499432.24       0.08700         0.15100        
+8threads-spinlock    700000          686082.78       0.08700         0.15100        
+8threads-spinlock    750000          694080.30       0.08700         0.18300
+
+
+**Spinlock - 16 threads, 16 shards**
+Spinlock is eating away at CPU resources when one thread holds it for prolonged period, slowing execution of thread doing processing
+Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+-------------------- ----------      ----------      --------        --------       
+8threads-spinlock    100000          99980.90        0.09500         3.45500        
+8threads-spinlock    200000          199562.73       0.08700         3.48700        
+8threads-spinlock    300000          295515.49       0.09500         3.32700        
+8threads-spinlock    500000          410915.76       0.09500         3.45500        
+8threads-spinlock    700000          431231.84       0.09500         3.51900        
+8threads-spinlock    750000          414914.37       0.09500         3.56700
+
+
+**Mutex - 16 threads, 16 shards**
+Spiked p99 latency has gone away now that processing threads can have full resources while competing threads sleep trying to acquire lock
+Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+-------------------- ----------      ----------      --------        --------       
+16threads-mutex      100000          100011.03       0.08700         0.27900        
+16threads-mutex      200000          199992.09       0.08700         0.24700        
+16threads-mutex      300000          299988.93       0.08700         0.23100        
+16threads-mutex      500000          498803.89       0.08700         0.21500        
+16threads-mutex      700000          696076.57       0.08700         0.21500        
+16threads-mutex      750000          689217.18       0.10300         0.24700
+
+
+**Optimization: TCP_NODELAY**
+I think this will keep the number of send syscalls appx the same as well as throughput but reduce latency since packets are sent immediately from the kernel buffer, and the send syscall, which writes packets to the kernel buffer, will not write the packets any faster or spend any less time in the syscall, only the OS will send them faster once the bytes are written.
+
+*Before*
+taskset -c 0-7 ./build/RedisClone
+taskset -c 8,10,12,14 memtier -s localhost -p 6379 -t 4 -c 20 --test-time=30s --ratio=1:1 --data-size=32 --key-pattern=R:R --hide-histogram --rate-limiting=30000
+sudo strace -c -p $(pgrep RedisClone) -- sleep 15
+% time     seconds  usecs/call     calls    errors syscall
+ 32.37   23.227157          27    858260    429133 recvfrom
+ 25.88   18.568373          67    276515           epoll_wait
+ 23.31   16.722769          38    429127           sendto
+ 18.13   13.008647          30    429134           epoll_ctl
+
+taskset -c 8,10,12,14 ./benchmark.sh rate-sweep 8threads-sharded
+Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+-------------------- ----------      ----------      --------        --------       
+8threads-sharded     100000          100008.11       0.09500         0.18300        
+8threads-sharded     200000          199982.44       0.09500         0.16700        
+8threads-sharded     300000          299965.42       0.09500         0.15900        
+8threads-sharded     500000          498861.03       0.09500         0.15900        
+8threads-sharded     700000          661625.39       0.09500         0.15900        
+8threads-sharded     750000          674602.86       0.09500         0.16700
+
+On the above benchmark.sh run:
+sudo perf record -F 999 -g -p $(pgrep RedisClone) -- sleep 15
+*sys_sendto:* 32.96% sampling share
+
+*After*
+strace (as above):
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 32.43   25.918397          27    945193    472598 recvfrom
+ 25.81   20.627696          67    304951           epoll_wait
+ 23.24   18.575740          39    472595           sendto
+ 18.19   14.537242          30    472599           epoll_ctl
+
+benchmark.sh:
+Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)       
+-------------------- ----------      ----------      --------        --------       
+8threads-sharded     100000          99999.41        0.09500         0.15900        
+8threads-sharded     200000          199978.73       0.09500         0.15900        
+8threads-sharded     300000          299999.64       0.09500         0.15900        
+8threads-sharded     500000          497364.55       0.09500         0.15900        
+8threads-sharded     700000          651587.87       0.09500         0.15900        
+8threads-sharded     750000          661955.91       0.09500         0.16700
+
+*sys_sendto:* 32.72% sampling share
+
+**Conclusion**
+While throughput and send syscall share did remain effectively constant, p99 (and p50) latency remained near unchanged as well. This could be due to Redis's workload pattern where packets are usually only send after the client already acknowledges the previous packet, which makes the kernel flush its buffer immediately anyways if it has no packets to buffer during unacknowledge packets being in flight.
