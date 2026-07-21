@@ -1,0 +1,121 @@
+handshake:
+Set replica-of flag on startup
+	- initiates handshake w/ master
+	- once complete and FULLRESYNC, move on
+need
+	- handle PSYNC in router
+	- thread that got PSYNC command will kickoff serialization in a new thread
+
+
+Sync:
+	- host iterates thru kv store, locking shard
+		- writes entries to data structure
+	- adds buffer to shard for clients to write to; releases shard lock
+		- parse ds, serializing to RESP and send buffer of RESP cmds after
+	- replica receives batches, parsing as they come in from socket recv using ring buffer
+
+	- meanwhile clients acquire shard locks then write commands to shard_buffer[replica_id] for replica_id in shard_buffer;
+		shard_buffer[replica_id] is needed since multiple replicas (each at different progress in a full sync) may need different commands buffered that newer replicas include in their copy
+	
+	- after replication, gets shard_buffers[replica_id] for each shard, flushes to replica then removes buffer from list
+	- adds replica connection to list for clients to forward commands to
+need
+	- probably std vector for storing key value pairs; either other data structure for lists or serialize somehow
+	- parse std vector, serialize to values RESP, and write to linked chunk allocator for one writev send to avoid syscall overhead of batch sending	
+	- linked chunk allocator for shard_buffers for clients to write to
+		- writev() is the clean solution here: build an array of iovec structs pointing at each chunk, one writev() call sends everything without copying into a contiguous buffer first.
+	- replication thread iterates over each shard to send commands from shard_buffers[replica_id]; acquires lock then removes buffer to stop future clients from writing to it
+	- replica logic to recv commands from master (first initial batches, then buffers, then ready for async replication)
+		- write n bytes from recv into ring buffer while consumer thread reads from it; reads one command at a time?
+			- would need to be SPSC otherwise multiple reading threads could read interleaved command bytes
+
+After:
+	- async thread intercepts command and writes to each replica
+		- do after executing write
+	- testing replica: have thread to print kv store (will be small)
+need
+	- master threads send cmd to replicas after sending to client
+	- replica has loop to recv command data from master only; parse but not send responses
+
+
+ The one wrinkle: commands can wrap around the end of the ring. You either handle that in the parser (awkward), or when you detect that a command would straddle the end, you memmove the partial command to the front before the next recv(). That's far cheaper than the current approach which memmoves the entire remaining buffer on every command.
+
+Later: pre-existing replica fills in new replica instead of master; has same serialization and cmd buffer logic
+
+
+steps:
+replica:
+initialize_replication
+	- establish conn to master
+	- send PING
+	- send PSYNC
+replica_listen; needs master Socket
+	- using conn to master
+	- listens and parses commands, not sending responses
+
+master:
+	- PSYNC handler to send back FULLRESYNC response
+		- pass up enum HandlerAction {NONE,INITREPLICA}
+		- assign atomic replica id, move replica fd to thread, unregister from epoll
+		- create detached thread to perform replication
+
+	replfullsync; needs replica Socket
+		- for shard in shards
+			- lock and iterate, push kv pairs to std vector<pair<string,string>>; for list vector<pair<string, deque<string>>
+				- reserve vectors and .clear() after each shard for reuse
+			- add a ReplicaBuffer to shard_buffer[replica_id] then unlock
+			- write RESP to arena alloc, writev loop to send to replica
+			after sending all shards; iterate again
+			- lock shard; drain buffer in writev loop; buffers.erase(replica_id); storage.replicas_map(move replica_fd) and replica buffer; unlock
+				- storage needs unordered_map<replica_id: ReplicaBuffer>; RepBuf has lock and vector<string> (holds RESP data to be sent)
+	- client handler threads meanwhile:
+		- lock shard; write; for id, buffer in shard_buffers, write RESP; unlock
+		- write to id for id in storage.replicas; established replicas
+	- background replica thread
+		- for replica fd in storage.replicas, drain replica_buffer
+
+
+
+Yes, you need two levels of locking:
+
+1. A readers-writer lock (or mutex) on the map itself — held shared (read) when appending to an existing replica's buffer, held exclusive (write) when adding or removing a replica from the map
+2. A per-replica mutex on each buffer — held briefly while appending command bytes
+
+The sequence for an epoll thread propagating a write:
+shared_lock(map_mutex)        // many epoll threads can hold this simultaneously
+for each replica in map:
+    lock(replica.buf_mutex)   // brief, just the append
+    append command bytes
+    unlock(replica.buf_mutex)
+shared_unlock(map_mutex)
+
+Adding/removing a replica (rare, on connect/disconnect):
+exclusive_lock(map_mutex)     // blocks all epoll threads briefly
+insert or erase from map
+exclusive_unlock(map_mutex)
+
+std::shared_mutex with std::shared_lock / std::unique_lock is the stdlib type for this. The outer shared lock is held for almost no time (just long enough to iterate and kick off per-buffer appends), so the exclusive lock for add/remove will rarely block epoll threads for long.
+
+The key insight: readers-writer lock is worth it here because replica add/remove is extremely rare compared to the per-command propagation writes. A plain mutex would serialize all epoll threads on every command even though they could all safely read the map simultaneously.
+
+
+
+
+Track a monotonically increasing byte counter on both sides:
+
+Master side: maintain std::atomic<uint64_t> repl_offset in Storage. Every time a write command is propagated to replicas, increment it by the byte length of the RESP command. This happens in send_to_replicas.
+
+Replica side: maintain a local uint64_t repl_offset. Every time the replica applies a command received from the master, increment it by the byte length of that command (which you already know from state.start_idx in the parse loop).
+
+Handshake change: instead of PSYNC ? -1, the replica sends PSYNC <replication_id> <offset>. Master compares the replica's offset against its replication backlog. If the delta is within the backlog, partial resync — send just the missing bytes. If not, full resync.
+
+Replication backlog: a fixed-size ring buffer (say 1MB) on the master that holds the last N bytes of propagated commands. This is what makes partial resync possible — instead of re-sending the full snapshot, the master just sends backlog[replica_offset..master_offset].
+
+For failover specifically, the offset is simpler — you just need replicas to report their offset during election so the most up-to-date one can be elected. You don't need partial resync working for that. So the minimal implementation is:
+
+1. Increment a counter on master per propagated byte
+2. Increment a counter on replica per applied byte
+3. Replica reports its offset in the SUSPECT / election messages
+4. Highest offset wins election
+
+The replication backlog (for partial resync after reconnect) is a separate optimization you can defer.

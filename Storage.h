@@ -9,6 +9,7 @@
 #include <optional>
 #include <chrono>
 #include <atomic>
+#include "Socket.h"
 #include "StringHash.h"
 
 struct Stats {
@@ -31,9 +32,20 @@ struct StorageResult {
     bool ok() const { return error == StorageError::Ok; }
 };
 
+struct ReplicaBuffer {
+    std::vector<std::string> commands;
+    std::mutex lock;
+};
+
+struct Replica {
+    Socket replica_socket;
+    ReplicaBuffer buffer;
+};
+
 struct Shard {
     std::unordered_map<std::string, std::variant<std::string, std::deque<std::string>>, StringHash, std::equal_to<>> m_;
     std::unordered_map<std::string, std::chrono::steady_clock::time_point, StringHash, std::equal_to<>> expiry;
+    std::unordered_map<uint32_t, ReplicaBuffer> buffers;
     std::mutex lock;
 };
 
@@ -44,6 +56,11 @@ class Storage {
         std::deque<std::string>,
         std::string
     >;
+    std::atomic<uint32_t> next_replica_id{0};
+    std::vector<Socket> replica_sockets;
+    std::unordered_map<uint32_t, Replica> replicas;
+    std::mutex replicas_lock; // separate lock to write+erase+read from rep buffers
+
     static constexpr int NUM_SHARDS { 16 };
     std::array<Shard, NUM_SHARDS> shards;
     bool _check_and_delete_if_expr(std::string_view, Shard&);
@@ -63,4 +80,14 @@ public:
     size_t persist(std::string_view);
     int ttl(std::string_view);
     std::string info();
+    void serialize_shard(int, uint32_t, std::vector<std::pair<std::string, std::string>>&, std::vector<std::pair<std::string, std::deque<std::string>>>&);
+    uint32_t get_new_replica_id() { return next_replica_id.fetch_add(1, std::memory_order_relaxed); }
+    int get_num_shards() { return NUM_SHARDS; }
+    std::unordered_map<uint32_t, Replica>& get_replicas() { return replicas; }
+    std::mutex& get_replicas_lock() { return replicas_lock; }
+    void add_replica(uint32_t, Socket);
+    std::vector<std::string>* get_shard_buffer(int, uint32_t);
+    void delete_shard_buffer(int, uint32_t);
+    void send_to_replicas(std::string_view);
+    void print_kv();
 };

@@ -74,14 +74,14 @@ EpollFd::~EpollFd() {
 
 int EpollFd::register_connection(Connection* conn_ptr) const {
 	epoll_event event;
-	event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
+	event.events = EPOLLIN | EPOLLONESHOT;
 	event.data.ptr = conn_ptr;
 	return epoll_ctl(epfd_, EPOLL_CTL_ADD, conn_ptr->sock.fd(), &event);
 }
 
 int EpollFd::rearm_connection(Connection* conn_ptr) const {
 	epoll_event event;
-	event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
+	event.events = EPOLLIN | EPOLLONESHOT;
 	event.data.ptr = conn_ptr;
 	return epoll_ctl(epfd_, EPOLL_CTL_MOD, conn_ptr->sock.fd(), &event);
 }
@@ -89,14 +89,14 @@ int EpollFd::rearm_connection(Connection* conn_ptr) const {
 // for registering server fd which must have .data.ptr == nullptr
 int EpollFd::register_fd(int fd) const {
 	epoll_event event;
-	event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
+	event.events = EPOLLIN | EPOLLONESHOT;
 	event.data.ptr = nullptr;
 	return epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &event);
 }
 
 int EpollFd::rearm_fd(int fd) const {
 	epoll_event event;
-	event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
+	event.events = EPOLLIN | EPOLLONESHOT;
 	event.data.ptr = nullptr;
 	return epoll_ctl(epfd_, EPOLL_CTL_MOD, fd, &event);
 }

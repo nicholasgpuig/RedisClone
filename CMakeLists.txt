@@ -5,7 +5,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "" FORCE)
 endif()
 
-add_executable(RedisClone main.cpp Socket.cpp handle.cpp Router.cpp Storage.cpp)
+add_executable(RedisClone main.cpp Socket.cpp handle.cpp Router.cpp Storage.cpp replica.cpp master.cpp)
 
 set_property(TARGET RedisClone PROPERTY CXX_STANDARD 20)
 set_property(TARGET RedisClone PROPERTY CXX_STANDARD_REQUIRED ON)

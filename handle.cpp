@@ -1,6 +1,3 @@
-// parse std string as vector of commands
-// command structs w/ name and args
-
 #include <string_view>
 #include <vector>
 #include <optional>
@@ -54,7 +51,7 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
         if (state.command_name.empty()) {
             state.command_name = buf.substr(body_start, body_end - body_start);
         } else {
-            state.command_args.push_back(std::string(buf.substr(body_start, body_end - body_start)));
+            state.command_args.push_back(std::string(buf.substr(body_start, body_end - body_start))); // examine instructions for this; see if constructing in vector?
         }
 
         --state.strings_remaining;
@@ -65,13 +62,13 @@ ParseResponseType parse_commands(std::string_view buf, ClientState& state) {
 }
 
 
-ParseSendResult parse_and_send(Connection& connection, Router& router) {
+ParseSendResult parse_and_send(Connection& connection, Router& router, Storage& storage) {
     ParseSendResult result {0, 0, 0, ParseSendError::OK};
     ParseResponseType res = parse_commands(connection.buf, connection.state);
     while (res == ParseResponseType::COMPLETE) {
         result.bytes_read += connection.state.start_idx;
         ++result.commands;
-        std::string response = router.dispatch(connection.state.command_name, connection.state.command_args);
+        auto [response, action] = router.dispatch(connection.state.command_name, connection.state.command_args);
         size_t total = 0;
         while (total < response.size()) {
             auto sent = send(connection.sock.fd(), response.data() + total, response.size() - total, MSG_DONTWAIT); // todo: make MSG_DONTWAIT and epoll for eagain
@@ -83,6 +80,8 @@ ParseSendResult parse_and_send(Connection& connection, Router& router) {
             total += sent;
             result.bytes_sent += sent;
         }
+        if (action == HandlerAction::SENDTOREPLICAS) storage.send_to_replicas({connection.buf.data(), connection.state.start_idx});
+        if (action == HandlerAction::INITREPLICA) result.actions.insert(action);
         connection.buf.erase(0, connection.state.start_idx); // start_idx should be size of all consumed bytes (start of next command if there)
         connection.state = ClientState{};
         res = parse_commands(connection.buf, connection.state);
@@ -115,140 +114,146 @@ std::string serialize_to_integer_reply(T num) { // concept in future to ensure i
     Key value string handlers
 */
 
-std::string handle_set(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_set(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     storage.set(args[0], args[1]);
-    return "+OK\r\n";
+    return {"+OK\r\n", HandlerAction::SENDTOREPLICAS};
 }
 
-std::string handle_get(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT; // handling 1 key for now
+std::pair<std::string, HandlerAction> handle_get(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE}; // handling 1 key for now
 
     const StorageResult res = storage.get(args[0]);
     if (!res.ok()) {
-        if (res.error == StorageError::NotFound) return "$-1\r\n";
-        return ERROR_WRONG_TYPE;
+        if (res.error == StorageError::NotFound) return {"$-1\r\n", HandlerAction::NONE};
+        return {ERROR_WRONG_TYPE, HandlerAction::NONE};
     }
-    return serialize_to_bulk_string(res.value);
+    return {serialize_to_bulk_string(res.value), HandlerAction::NONE};
 }
 
 /*
     List handlers
 */
 
-std::string handle_lpush(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_lpush(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     const StorageResult<size_t> res = storage.deque_push(args[0], args[1], true);
-    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
-    return serialize_to_integer_reply(res.value);
+    if (res.error == StorageError::WrongType) return {ERROR_WRONG_TYPE, HandlerAction::NONE};
+    return {serialize_to_integer_reply(res.value), HandlerAction::NONE};
 }
 
-std::string handle_rpush(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_rpush(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     const StorageResult<size_t> res = storage.deque_push(args[0], args[1], false);
-    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
-    return serialize_to_integer_reply(res.value);
+    if (res.error == StorageError::WrongType) return {ERROR_WRONG_TYPE, HandlerAction::NONE};
+    return {serialize_to_integer_reply(res.value), HandlerAction::SENDTOREPLICAS};
 }
 
-std::string handle_lpop(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_lpop(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     const StorageResult<std::string> res = storage.deque_pop(args[0], true);
-    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
-    if (res.error == StorageError::NotFound) return "$-1\r\n";
-    return serialize_to_bulk_string(res.value);
+    if (res.error == StorageError::WrongType) return {ERROR_WRONG_TYPE, HandlerAction::NONE};
+    if (res.error == StorageError::NotFound) return {"$-1\r\n", HandlerAction::NONE};
+    return {serialize_to_bulk_string(res.value), HandlerAction::NONE};
 }
 
-std::string handle_rpop(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_rpop(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     const StorageResult<std::string> res = storage.deque_pop(args[0], false);
-    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
-    if (res.error == StorageError::NotFound) return "$-1\r\n";
-    return serialize_to_bulk_string(res.value);
+    if (res.error == StorageError::WrongType) return {ERROR_WRONG_TYPE, HandlerAction::NONE};
+    if (res.error == StorageError::NotFound) return {"$-1\r\n", HandlerAction::NONE};
+    return {serialize_to_bulk_string(res.value), HandlerAction::NONE};
 }
 
-std::string handle_llen(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_llen(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     const StorageResult<size_t> res = storage.deque_len(args[0]);
-    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
-    return serialize_to_integer_reply(res.value);
+    if (res.error == StorageError::WrongType) return {ERROR_WRONG_TYPE, HandlerAction::NONE};
+    return {serialize_to_integer_reply(res.value), HandlerAction::NONE};
 }
 
-std::string handle_lrange(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 3) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_lrange(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 3) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     ssize_t lIndex;
     auto lresult = std::from_chars(args[1].data(), args[1].data() + args[1].size(), lIndex);
-    if (lresult.ec == std::errc::invalid_argument) return "-ERR value is not an integer or out of range\r\n";
+    if (lresult.ec == std::errc::invalid_argument) return {"-ERR value is not an integer or out of range\r\n", HandlerAction::NONE};
     ssize_t rIndex;
     auto rresult = std::from_chars(args[2].data(), args[2].data() + args[2].size(), rIndex);
-    if (rresult.ec == std::errc::invalid_argument) return "-ERR value is not an integer or out of range\r\n";
+    if (rresult.ec == std::errc::invalid_argument) return {"-ERR value is not an integer or out of range\r\n", HandlerAction::NONE};
 
     const StorageResult<std::vector<std::string>> res = storage.deque_range(args[0], lIndex, rIndex);
-    if (res.error == StorageError::WrongType) return ERROR_WRONG_TYPE;
-    return serialize_to_string_array(res.value);
+    if (res.error == StorageError::WrongType) return {ERROR_WRONG_TYPE, HandlerAction::NONE};
+    return {serialize_to_string_array(res.value), HandlerAction::NONE};
 }
 
 /*
     Misc handlers
 */
 
-std::string handle_exists(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_exists(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
-    return storage.exists(args[0]) ? ":1\r\n" : ":0\r\n";
+    return {storage.exists(args[0]) ? ":1\r\n" : ":0\r\n", HandlerAction::NONE};
 }
 
-std::string handle_del(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_del(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     const auto n = storage.del(args[0]);
-    return serialize_to_integer_reply(n);
+    return {serialize_to_integer_reply(n), HandlerAction::NONE};
 }
 
-std::string handle_expire(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 2) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_expire(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
     int seconds;
     auto parseResult = std::from_chars(args[1].data(), args[1].data() + args[1].size(), seconds);
-    if (parseResult.ec == std::errc::invalid_argument || seconds <= 0) return "-ERR value is not an integer or out of range\r\n";
+    if (parseResult.ec == std::errc::invalid_argument || seconds <= 0) return {"-ERR value is not an integer or out of range\r\n", HandlerAction::NONE};
 
     const size_t n = storage.expire(args[0], seconds);
-    return serialize_to_integer_reply(n);
+    return {serialize_to_integer_reply(n), HandlerAction::NONE};
 }
 
-std::string handle_persist(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_persist(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
-    return serialize_to_integer_reply(storage.persist(args[0]));
+    return {serialize_to_integer_reply(storage.persist(args[0])), HandlerAction::NONE};
 }
 
-std::string handle_ttl(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() != 1) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_ttl(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 1) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
-    return serialize_to_integer_reply(storage.ttl(args[0]));
+    return {serialize_to_integer_reply(storage.ttl(args[0])), HandlerAction::NONE};
 }
 
-std::string handle_unknown() {
-    return "-Error unknown command\r\n";
+std::pair<std::string, HandlerAction> handle_unknown() {
+    return {"-Error unknown command\r\n", HandlerAction::NONE};
 }
 
-std::string handle_ping(const std::vector<std::string>& args, Storage& storage) {
+std::pair<std::string, HandlerAction> handle_ping(const std::vector<std::string>& args, Storage& storage) {
     if (args.size() > 1) {
-        return ERROR_INVALID_ARG_COUNT;
+        return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
     } else if (args.size() == 1) {
-        return serialize_to_bulk_string(args[0]);
+        return {serialize_to_bulk_string(args[0]), HandlerAction::NONE};
     }
-    return "+PONG\r\n";
+    return {"+PONG\r\n", HandlerAction::NONE};
 }
 
-std::string handle_info(const std::vector<std::string>& args, Storage& storage) {
-    if (args.size() > 0) return ERROR_INVALID_ARG_COUNT;
+std::pair<std::string, HandlerAction> handle_info(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() > 0) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
 
-    return serialize_to_bulk_string(storage.info());
+    return {serialize_to_bulk_string(storage.info()), HandlerAction::NONE};
+}
+
+std::pair<std::string, HandlerAction> handle_psync(const std::vector<std::string>& args, Storage& storage) {
+    if (args.size() != 2) return {ERROR_INVALID_ARG_COUNT, HandlerAction::NONE};
+
+    return {"+FULLRESYNC 0 0\r\n", HandlerAction::INITREPLICA};
 }

@@ -25,6 +25,9 @@ void Storage::set(std::string key, std::string value) {
     std::lock_guard lg(shard.lock);
     auto it = shard.expiry.find(std::string_view(key));
     if (it != shard.expiry.end()) shard.expiry.erase(it);
+    for (auto& [id, buffer] : shard.buffers) {
+        buffer.commands.emplace_back("*3\r\n$3\r\nSET\r\n$" + std::to_string(key.size()) + "\r\n" + std::string(key) + "\r\n$" + std::to_string(value.size()) + "\r\n" + value);
+    }
     shard.m_[std::move(key)] = std::move(value);
 }
 
@@ -70,6 +73,10 @@ StorageResult<size_t> Storage::deque_push(std::string_view key, std::string valu
     auto* l = std::get_if<std::deque<std::string>>(&it->second);
     if (l == nullptr) return {0, StorageError::WrongType};
     
+    for (auto& [id, buffer] : shard.buffers) {
+        buffer.commands.emplace_back("*3\r\n$5\r\nRPUSH\r\n$" + std::to_string(key.size()) + "\r\n" + std::string(key) + "\r\n$" + std::to_string(value.size()) + "\r\n" + value);
+    }
+
     if (isLeftPush) {
         l->push_front(std::move(value));
     } else {
@@ -177,4 +184,70 @@ std::string Storage::info() {
     stats.bytes_read.load(std::memory_order_relaxed),
     stats.bytes_written.load(std::memory_order_relaxed),
     stats.total_commands.load(std::memory_order_relaxed));
+}
+
+void Storage::serialize_shard(int shard_id, uint32_t replica_id, std::vector<std::pair<std::string, std::string>>& pairs, std::vector<std::pair<std::string, std::deque<std::string>>>& lists) {
+    if (shard_id >= NUM_SHARDS) return;
+
+    auto& shard = shards[shard_id];
+    {
+        std::lock_guard lg(shard.lock);
+        for (auto& [key, value] : shard.m_) {
+            if (const auto* val_ptr = std::get_if<std::string>(&value)) {
+                pairs.emplace_back(key, *val_ptr);
+            } else {
+                const auto& deque_val = std::get<std::deque<std::string>>(value);
+                lists.emplace_back(key, deque_val);
+            }
+        }
+        shard.buffers.try_emplace(replica_id);
+    }
+}
+
+void Storage::add_replica(uint32_t replica_id, Socket replica_socket) {
+    std::lock_guard lg(replicas_lock);
+    replicas.try_emplace(replica_id, std::move(replica_socket));
+}
+
+std::vector<std::string>* Storage::get_shard_buffer(int shard_id, uint32_t replica_id) {
+    Shard& shard = shards[shard_id];
+    auto it = shard.buffers.find(replica_id);
+    if (it == shard.buffers.end()) return nullptr;
+
+    return &it->second.commands;
+}
+void Storage::delete_shard_buffer(int shard_id, uint32_t replica_id) {
+    Shard& shard = shards[shard_id];
+    auto it = shard.buffers.find(replica_id);
+    if (it == shard.buffers.end()) return;
+
+    shard.buffers.erase(it);
+}
+
+void Storage::send_to_replicas(std::string_view sv) {
+    std::lock_guard lg(replicas_lock);
+    for (auto& [id, replica] : replicas) {
+        std::lock_guard rlg(replica.buffer.lock);
+        replica.buffer.commands.emplace_back(sv);
+    }
+}
+
+#include <iostream>
+void Storage::print_kv() {
+    for (int i = 0; i < 16; ++i) {
+        Shard& sh = shards[i];
+        std::lock_guard lg(sh.lock);
+        for (auto& [key, value] : sh.m_) {
+            if (auto* l = std::get_if<std::string>(&value)) {
+                std::cout << std::format("{}: {}", key, *l) << '\n';
+            } else {
+                auto d = std::get<std::deque<std::string>>(value);
+                std::cout << "List: " << key << '\n';
+                for (auto& item : d) {
+                    std::cout << item << ' ';
+                }
+                std::cout << "\n\n";
+            }
+        }
+    }
 }
