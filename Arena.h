@@ -1,6 +1,6 @@
 #pragma once
 
 struct Arena {
-    char buf[8192];
+    char buf[65536];
     char* cursor = buf;
 };

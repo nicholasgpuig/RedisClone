@@ -156,3 +156,23 @@ Config               Target RPS      Actual RPS      P50 (ms)        P99 (ms)
 
 **Conclusion**
 While throughput and send syscall share did remain effectively constant, p99 (and p50) latency remained near unchanged as well. This could be due to Redis's workload pattern where packets are usually only send after the client already acknowledges the previous packet, which makes the kernel flush its buffer immediately anyways if it has no packets to buffer during unacknowledge packets being in flight.
+
+
+**Benchmark: replication**
+Arena is size 65536
+
+50k keys
+    Replica    Sync (ms)    Keys/s      
+    -------    ---------    ------      
+    0          64ms         769230/s    
+    1          64ms         769230/s    
+    2          64ms         769230/s    
+    3          64ms         769230/s
+
+500k keys
+    Replica    Sync (ms)    Keys/s      
+    -------    ---------    ------      
+    0          914ms        546448/s    
+    1          970ms        514933/s    
+    2          969ms        515463/s    
+    3          970ms        514933/s 

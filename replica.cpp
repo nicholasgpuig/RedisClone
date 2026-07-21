@@ -63,7 +63,6 @@ void replica_worker_loop(Socket master_sock, Router& router) {
         ParseResponseType res = parse_commands(buf, state);
         while (res == ParseResponseType::COMPLETE) {
             auto [response, action] = router.dispatch(state.command_name, state.command_args);
-            router.print();
 
             // if (action != HandlerAction::NONE) result.actions.insert(action);
             buf.erase(0, state.start_idx);

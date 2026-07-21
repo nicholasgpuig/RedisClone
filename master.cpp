@@ -123,8 +123,7 @@ void replica_fullsync(Socket replica_socket, uint32_t replica_id, Storage& stora
         }
     }
 
-    // background thread every 200ms to clear all buffers; use shared mutex on global map; single for each replica
-    
+    spdlog::info("Full sync done replica {}", replica_id);
 }
 
 void master_worker_loop(const EpollFd& epoll_fd, const ServerSocket& server, Storage& storage, Router& router) {
@@ -216,7 +215,6 @@ void replica_sync_loop(std::unordered_map<uint32_t, Replica>& replicas, std::mut
             std::vector<struct iovec> iov;
             iov.reserve(replica.buffer.commands.size());
             for (const auto& cmd : replica.buffer.commands) {
-                spdlog::info(cmd);
                 iov.push_back({const_cast<char*>(cmd.data()), cmd.size()});
             }
             writev(replica.replica_socket.fd(), iov.data(), iov.size());

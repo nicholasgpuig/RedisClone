@@ -4,6 +4,7 @@
 #include <functional>
 #include <optional>
 #include <charconv>
+#include <csignal>
 #include "Socket.h"
 #include "Router.h"
 #include "Storage.h"
@@ -21,6 +22,10 @@ struct CmdOptions {
 std::optional<std::string> parse_cmd_options(int argc, char* argv[], CmdOptions& options);
 
 int main(int argc, char* argv[]){
+    signal(SIGINT,  [](int) { _exit(0); });
+    signal(SIGTERM, [](int) { _exit(0); });
+    spdlog::flush_on(spdlog::level::info);
+
     CmdOptions options;
     auto err = parse_cmd_options(argc, argv, options);
     if (err) {
@@ -30,11 +35,6 @@ int main(int argc, char* argv[]){
     Storage storage;
     Router router(storage);
 
-    const ServerSocket server(options.listen_port);
-    if (!server) {
-        spdlog::error("Server socket failed to start");
-        return 1;
-    }
     if (options.master_ipv4) {
         Socket master_sock = initialize_replica(*options.master_ipv4, *options.master_port);
         if (!master_sock) return 1;
@@ -51,7 +51,13 @@ int main(int argc, char* argv[]){
 
         replica_worker_loop(std::move(master_sock), router);
     } else {
-        router.add_all(); // all master commands available
+        router.add_all();
+
+        const ServerSocket server(options.listen_port);
+        if (!server) {
+            spdlog::error("Server socket failed to start");
+            return 1;
+        }
 
         const EpollFd epoll_fd;
         if (!epoll_fd) {
